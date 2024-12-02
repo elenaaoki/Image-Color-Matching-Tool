@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Color Matching Tool</title>
+    <style>
+        /* General Reset */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Font Import */
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+
+        /* Body Styling */
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #f9f9f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        header {
+            width: 100%;
+            padding: 15px 10px;
+            text-align: center;
+            color: #333;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            margin-top: 10px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .file-input,
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        input[type="file"] {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+
+        button {
+            background-color: #cc0000;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 10px 15px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #990000;
+        }
+
+        label {
+            font-size: 0.9rem;
+            color: #555;
+        }
+
+        #intensitySlider {
+            width: 100%;
+        }
+
+        #output canvas {
+            max-width: 100%;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        footer {
+            margin-top: auto;
+            font-size: 0.8rem;
+            color: #777;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <header>Image Color Matching Tool</header>
+    <div class="container">
+        <p style="text-align: center; font-size: 1rem;">Upload two photos to copy color grading:</p>
+        <div class="file-input">
+            <input type="file" id="sourceImage" accept="image/*">
+            <input type="file" id="targetImage" accept="image/*">
+        </div>
+        <button id="generateButton">Generate</button>
+        <div id="sliderContainer" class="controls hidden">
+            <label for="intensitySlider">Adjust Intensity</label>
+            <input type="range" id="intensitySlider" min="0" max="100" value="50">
+        </div>
+        <button id="downloadButton" class="hidden">Download</button>
+        <div id="output"></div>
+    </div>
+    <footer>
+        &copy; 2024 Image Color Matching Tool. <a href="https://www.chapteria.com/">Chapteria.</a>
+    </footer>
+
+    <script>
+        let intensity = 0.5; // Default intensity (50%)
+
+        document.getElementById('intensitySlider').addEventListener('input', (event) => {
+            intensity = event.target.value / 100;
+            applyColorGradingWithIntensity();
+        });
+
+        let sourceImage, targetImage, resultCanvas, sourceData, targetData, adjustment;
+
+        document.getElementById('generateButton').addEventListener('click', async () => {
+            const sourceInput = document.getElementById('sourceImage');
+            const targetInput = document.getElementById('targetImage');
+            const outputDiv = document.getElementById('output');
+
+            if (!sourceInput.files[0] || !targetInput.files[0]) {
+                alert('Please upload both images!');
+                return;
+            }
+
+            sourceImage = await loadImage(URL.createObjectURL(sourceInput.files[0]));
+            targetImage = await loadImage(URL.createObjectURL(targetInput.files[0]));
+
+            // Prepare source and target data
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = sourceImage.width;
+            tempCanvas.height = sourceImage.height;
+            tempCtx.drawImage(sourceImage, 0, 0);
+            sourceData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+
+            const targetCanvas = document.createElement('canvas');
+            const targetCtx = targetCanvas.getContext('2d');
+            targetCanvas.width = targetImage.width;
+            targetCanvas.height = targetImage.height;
+            targetCtx.drawImage(targetImage, 0, 0);
+            targetData = targetCtx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
+
+            // Calculate adjustment
+            const sourceAverage = calculateAverageColor(sourceData.data);
+            const targetAverage = calculateAverageColor(targetData.data);
+            adjustment = {
+                r: sourceAverage.r - targetAverage.r,
+                g: sourceAverage.g - targetAverage.g,
+                b: sourceAverage.b - targetAverage.b
+            };
+
+            // Generate initial result
+            applyColorGradingWithIntensity();
+
+            // Show the slider and download button
+            document.getElementById('sliderContainer').classList.remove('hidden');
+            document.getElementById('downloadButton').classList.remove('hidden');
+        });
+
+        function applyColorGradingWithIntensity() {
+            resultCanvas = document.createElement('canvas');
+            const ctx = resultCanvas.getContext('2d');
+            resultCanvas.width = targetData.width;
+            resultCanvas.height = targetData.height;
+
+            const adjustedData = new ImageData(new Uint8ClampedArray(targetData.data), targetData.width, targetData.height);
+
+            for (let i = 0; i < adjustedData.data.length; i += 4) {
+                adjustedData.data[i] = clamp(targetData.data[i] + adjustment.r * intensity); // Red
+                adjustedData.data[i + 1] = clamp(targetData.data[i + 1] + adjustment.g * intensity); // Green
+                adjustedData.data[i + 2] = clamp(targetData.data[i + 2] + adjustment.b * intensity); // Blue
+            }
+
+            ctx.putImageData(adjustedData, 0, 0);
+
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML = ''; // Clear previous results
+            outputDiv.appendChild(resultCanvas);
+
+            document.getElementById('downloadButton').onclick = () => downloadImage(resultCanvas, 'color-graded-image.png');
+        }
+
+        // Load an image and return it as an HTMLImageElement
+        function loadImage(src) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.crossOrigin = 'Anonymous';
+                img.onload = () => resolve(img);
+                img.src = src;
+            });
+        }
+
+        // Calculate average color
+        function calculateAverageColor(data) {
+            let r = 0, g = 0, b = 0, count = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                r += data[i];
+                g += data[i + 1];
+                b += data[i + 2];
+                count++;
+            }
+            return { r: r / count, g: g / count, b: b / count };
+        }
+
+        // Clamp value between 0 and 255
+        function clamp(value) {
+            return Math.max(0, Math.min(255, value));
+        }
+
+        // Download the canvas image
+        function downloadImage(canvas, filename) {
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+    </script>
+</body>
+</html>
